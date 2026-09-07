@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中国惯用语大全 · 常用惯用语与成语</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="expanded">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">惯</div>
+      <div>
+        <h1>中国惯用语大全</h1>
+        <p class="subtitle">常用惯用语 · 日常成语 · 释义与示例</p>
+      </div>
+    </div>
+    <div class="switch-zone">
+      <span class="switch-label" id="switchLabel">当前：释义全部显示</span>
+      <label class="switch" title="开启：释义与例子全部显示；关闭：悬停或聚焦词条时才显示">
+        <input type="checkbox" id="displayToggle" checked>
+        <span class="track"><span class="thumb"></span></span>
+      </label>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="toolbar" aria-label="筛选工具">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="14.5" y2="14.5"></line></svg>
+        <input type="search" id="searchInput" placeholder="搜索惯用语 / 成语 / 释义 / 例子…" autocomplete="off">
+      </div>
+     <div class="chips" id="chips">
+      <div class="counts" id="counts"></div>
+      <div class="filter-rows">
+        <div class="chip-row">
+          <span class="grp">词类</span>
+          <div class="chips" id="catChips">
+            <button class="chip small" data-cat="all" type="button">全部</button>
+            <button class="chip small" data-cat="惯用语" type="button">惯用语</button>
+            <button class="chip small" data-cat="成语" type="button">成语</button>
+          </div>
+        </div>
+        <div class="chip-row">
+          <span class="grp">常用度</span>
+          <div class="chips" id="freqChips">
+            <button class="chip small active" data-freq="all" type="button">全部</button>
+            <button class="chip small" data-freq="常用" type="button">常用</button>
+            <button class="chip small" data-freq="较常用" type="button">较常用</button>
+            <button class="chip small" data-freq="一般" type="button">一般</button>
+            <button class="chip small" data-freq="少见" type="button">少见</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p class="guide" id="guide"></p>
+    <section class="list" id="list" aria-live="polite"></section>
+  </main>
+
+ <footer>
+    <p>全量词库：惯用语与成语共计数万条，覆盖日常交流、书面写作与常见典故，释义力求准确易懂。</p>
+    <p class="foot-note">提示：关闭右上角开关后，释义与例子默认隐藏，鼠标悬停词条即可查看。</p>
+  </footer>
+
+<script src="data.js"></script>
+<script src="chengyu_full.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
