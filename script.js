@@ -128,28 +128,26 @@
   }
 
   function renderMoreArea(){
-    var more = shown.length > rendered;
-    if(more){
-      if(moreBtn.parentNode){
-        moreBtn.parentNode.textContent = "";
-        moreBtn.parentNode.appendChild(moreBtn);
-      } else {
-        var wrap = document.createElement("div");
-        wrap.className = "more-wrap";
-        wrap.appendChild(moreBtn);
-        listEl.appendChild(wrap);
-      }
+    // Remove any wrapper left over from an earlier render (it may be detached).
+    var parent = moreBtn.parentNode;
+    if(parent && parent.parentNode){
+      parent.parentNode.removeChild(parent);
+    }
+    if(shown.length > rendered){
+      var wrap = document.createElement("div");
+      wrap.className = "more-wrap";
+      wrap.appendChild(moreBtn);
+      listEl.appendChild(wrap);
       moreBtn.textContent = "加载更多（还剩 " + (shown.length - rendered) + " 条）";
-    } else if(moreBtn.parentNode){
-      moreBtn.parentNode.removeChild(moreBtn.parentNode);
     }
   }
 
   function drawMore(){
     if(rendered >= shown.length) return;
     var end = Math.min(shown.length, rendered + PAGE);
+    var ref = listEl.lastChild && listEl.lastChild.className === "more-wrap" ? listEl.lastChild : null;
     for(; rendered < end; rendered++){
-      listEl.insertBefore(buildCard(shown[rendered]), listEl.lastChild);
+      listEl.insertBefore(buildCard(shown[rendered]), ref);
     }
     renderMoreArea();
   }
@@ -175,13 +173,15 @@
   function updateGuide(){
     var tips = [];
     if(!toggleEl.checked) tips.push("释义与例子已隐藏，将鼠标悬停或键盘聚焦到词条上即可查看。");
-    var scope = [];
-    if(currentCat !== "all") scope.push(currentCat);
-    if(currentFreq !== "all") scope.push(currentFreq);
+    var catName = currentCat === "all" ? "全部" : currentCat;
+    var freqName = currentFreq === "all" ? "全部" : currentFreq;
     if(currentQuery){
-      tips.push("找到 " + shown.length + " 条与「" + currentQuery + "」相关的词条" + (scope.length ? "（" + scope.join(" / ") + "）" : "") + "。");
-    } else if(scope.length){
-      tips.push("当前筛选：" + scope.join(" / ") + "，共 " + shown.length + " 条。");
+      var scopes = [];
+      if(currentCat !== "all") scopes.push(currentCat);
+      if(currentFreq !== "all") scopes.push(currentFreq);
+      tips.push("找到 " + shown.length + " 条与「" + currentQuery + "」相关的词条" + (scopes.length ? "（" + scopes.join(" / ") + "）" : "") + "。");
+    } else {
+      tips.push("当前筛选：" + catName + " / " + freqName + "，共 " + shown.length + " 条。");
     }
     guideEl.textContent = tips.join("　");
   }
