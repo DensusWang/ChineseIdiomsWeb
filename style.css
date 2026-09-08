@@ -81,6 +81,10 @@ body.compact .switch-label{color:var(--teal)}
 }
 .chip:hover{color:var(--text);border-color:#3a4560}
 .chip.active{background:var(--accent);border-color:var(--accent);color:#1c1204;font-weight:600}
+/* 排序键：选“默认”时其余四键置暗；未选键时方向键禁用 */
+.chip.dim{opacity:.45}
+.chip:disabled{opacity:.45;cursor:not-allowed}
+.chip:disabled:hover{border-color:var(--line);color:var(--muted)}
 .counts{margin-left:auto;font-size:13px;color:var(--muted);white-space:nowrap}
 
 /* 词条列表 */

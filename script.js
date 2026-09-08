@@ -47,6 +47,7 @@
   var switchLabel = document.getElementById("switchLabel");
   var catChips = document.getElementById("catChips");
   var freqChips = document.getElementById("freqChips");
+  var sortChips = document.getElementById("sortChips");
   var favToggleBtn = document.getElementById("favToggle");
   var themeToggleBtn = document.getElementById("themeToggle");
 
@@ -256,6 +257,8 @@
   });
   var currentCat = "all";
   var currentFreq = "all";
+  var sortKey = "default";
+  var sortDir = "asc";
   var currentQuery = "";
   var searchTimer = null;
   var shown = [];
@@ -338,6 +341,30 @@
     if(!currentQuery) return true;
     return item.hay.indexOf(currentQuery) !== -1;
   }
+  /* ---------- 排序：首字拼音首字母 / 字数（升序 / 降序） ---------- */
+  function firstCharOf(phrase){ return Array.from(String(phrase || ""))[0] || ""; }
+  function sortInitialOf(phrase){
+    var ov = window.PINYIN_WORD_OVERRIDES;
+    if(ov && ov[phrase]) return ov[phrase];
+    var ci = window.PINYIN_CHAR_INITIALS;
+    return (ci && ci[firstCharOf(phrase)]) || "ZZ";
+  }
+  function sortLenOf(phrase){
+    return Array.from(String(phrase || "").replace(/[（()）\s]/g, "")).length;
+  }
+  function compareBySort(a, b){
+    var va, vb;
+    if(sortKey === "py"){
+      va = sortInitialOf(a.phrase);
+      vb = sortInitialOf(b.phrase);
+    } else {
+      va = sortLenOf(a.phrase);
+      vb = sortLenOf(b.phrase);
+    }
+    if(va === vb) return 0;
+    var c = va < vb ? -1 : 1;
+    return sortDir === "desc" ? -c : c;
+  }
   function renderMoreArea(){
     // Remove any wrapper left over from an earlier render (it may be detached).
     var parent = moreBtn.parentNode;
@@ -365,6 +392,7 @@
 
   function render(){
     shown = items.filter(matches);
+    if(sortKey !== "default"){ shown.sort(compareBySort); }
     rendered = 0;
     listEl.textContent = "";
 
@@ -392,7 +420,7 @@
   function updateGuide(){
     var tips = [];
     if(!toggleEl.checked){
-      tips.push(isCoarse ? "释义与例句已隐藏：在手机上点击词条即可查看。" : "释义与例子已隐藏，将鼠标悬停或键盘聚焦到词条上即可查看。");
+      tips.push(isCoarse ? "释义与例句已隐藏：在手机上点击词条即可查看。" : "释义与例句已隐藏：悬停显示释义，点击切换显隐。");
     }
     var catName = currentCat === "all" ? "全部" : currentCat;
     var freqName = currentFreq === "all" ? "全部" : currentFreq;
@@ -415,7 +443,7 @@
     bodyEl.classList.toggle("compact", !on);
     switchLabel.textContent = on
       ? "当前：释义全部显示"
-      : (isCoarse ? "当前：点击卡片显示释义" : "当前：悬停显示释义");
+      : (isCoarse ? "当前：点击卡片显示释义" : "当前：悬停/点击显隐释义");
   }
 
   /* 记录视口“最上方”词条的判定规则：
@@ -457,7 +485,7 @@
       if(dy !== 0 && window.scrollBy){ window.scrollBy(0, dy); }
     };
   }
-  /* 列表点击：收藏星标 / 移动端点击显隐释义 */
+  /* 列表点击：收藏星标 / 释义显隐切换（手机点按、桌面点击） */
   listEl.addEventListener("click", function(ev){
     var t = ev.target;
     if(!t || !t.closest) return;
@@ -476,19 +504,24 @@
       }
       return;
     }
-    if(isCoarse && bodyEl.classList.contains("compact") && card){
+    if(bodyEl.classList.contains("compact") && card){
+      /* 点击切换释义：展开则隐藏，隐藏则展开（手机与桌面一致） */
       var willOpen = !card.classList.contains("open");
       var openCards = listEl.querySelectorAll(".card.open");
       for(var i = 0; i < openCards.length; i++){
         if(openCards[i] !== card) openCards[i].classList.remove("open");
       }
       card.classList.toggle("open", willOpen);
+      if(!willOpen){
+        var ae = document.activeElement;
+        if(ae && ae !== document.body && card.contains(ae)){
+          try { ae.blur(); } catch(e) {}
+        }
+      }
     }
-  });
+  });
 
-
-  /* 桌面端隐藏模式：悬停显示释义、光标离开隐藏；点击时也隐藏并解除聚焦
-     （手机端仍是点按切换 .open，见上方列表点击处理） */
+  /* 桌面端隐藏模式：悬停显示释义、光标离开隐藏；列表点击处理里点击切换显隐 */
   if(!isCoarse){
     function cardFromNode(node){
       return (node && node.closest) ? node.closest(".card") : null;
@@ -503,15 +536,6 @@
     }, true);
     listEl.addEventListener("pointerleave", function(ev){
       setCardOpen(cardFromNode(ev.target), false);
-    }, true);
-    listEl.addEventListener("mousedown", function(ev){
-      var card = cardFromNode(ev.target);
-      if(!card) return;
-      setCardOpen(card, false);
-      var ae = document.activeElement;
-      if(ae && ae !== document.body && card.contains(ae)){
-        try { ae.blur(); } catch(e) {}
-      }
     }, true);
     listEl.addEventListener("focusin", function(ev){
       setCardOpen(cardFromNode(ev.target), true);
@@ -532,6 +556,48 @@
 
   bindChips(catChips, "data-cat", function(v){ currentCat = v; render(); });
   bindChips(freqChips, "data-freq", function(v){ currentFreq = v; render(); });
+  /* 排序按钮：默认 / 首字拼音 / 字数 / 升序 / 降序
+     选“默认”时其余四键置暗（不可排序）；选定键后自动按升序，可再点“降序”切换 */
+  function refreshSortChips(){
+    if(!sortChips) return;
+    var keyOn = sortKey !== "default";
+    sortChips.querySelectorAll(".chip").forEach(function(c){
+      var v = c.getAttribute("data-sort");
+      var active = false, dim = false;
+      if(v === "default"){
+        active = !keyOn;
+      } else if(!keyOn){
+        dim = true;
+      } else if(v === "py" || v === "len"){
+        active = (sortKey === v);
+      } else {
+        active = (sortDir === v);
+      }
+      c.classList.toggle("active", active);
+      c.classList.toggle("dim", dim);
+      if(v === "asc" || v === "desc"){ c.disabled = !keyOn; }
+    });
+  }
+  if(sortChips){
+    sortChips.addEventListener("click", function(ev){
+      var chip = ev.target.closest ? ev.target.closest(".chip") : null;
+      if(!chip || chip.disabled) return;
+      var v = chip.getAttribute("data-sort");
+      if(v === "default"){
+        sortKey = "default";
+        sortDir = "asc";
+      } else if(v === "py" || v === "len"){
+        sortKey = v;
+      } else if(v === "asc" || v === "desc"){
+        sortDir = v;
+      } else {
+        return;
+      }
+      refreshSortChips();
+      render();
+    });
+  }
+  refreshSortChips();
 
   toggleEl.addEventListener("change", function(){
     var anchor = captureAnchor();

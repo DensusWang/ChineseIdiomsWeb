@@ -3,9 +3,10 @@
 此目录是一个**纯静态中文“惯用语 + 成语”查询网页**，无后端、无构建步骤，双击 `chinese_idioms.html` 即可在浏览器使用（file:// 直接打开正常）。
 
 ## 文件清单与职责
-- `index.html`：唯一入口页（曾用名 `chinese_idioms.html`），按顺序加载 `data.js` → `chengyu_full.js` → `script.js`，样式 `style.css`。
+- `index.html`：唯一入口页（曾用名 `chinese_idioms.html`），按顺序加载 `data.js` → `chengyu_full.js` → `pinyin_initials.js` → `script.js`，样式 `style.css`。
 - `data.js`：**人工精选数据，勿轻易改动内容**。声明 `var HABIT_DATA`（惯用语 180 条）、`var IDIOM_DATA`（成语 121 条）。
 - `chengyu_full.js`：**全量自动生成数据**。声明 `var HABIT_BULK_DATA`（惯用语 1382 条）、`var IDIOM_BULK_DATA`（成语 29502 条）。由开源语料 chinese-xinhua `idiom.json`（30895 条）生成。
+- `pinyin_initials.js`：**构建产物（勿手改）**。声明 `var PINYIN_CHAR_INITIALS`（首字→常用拼音首字母，3123 个）、`var PINYIN_WORD_OVERRIDES`（个别多音词整词→首字母，95 个），由 pinyin-pro 离线生成，供 script.js 的“首字拼音首字母”排序使用；不改变数据规模。
 - `script.js`：全部交互逻辑（合并去重、搜索、筛选、增量渲染）。**除非必要不要改**。
 - `style.css`：界面样式（顶部开关、词条卡片、频率标签颜色等）。
 
@@ -55,7 +56,10 @@
 18. 移动端下滑收起范围调整：不再只折叠 `.brand-copy` 文字，改为隐藏“中国惯用语大全”所在的整块 `.brand` 容器（含“惯”字图标与副标题，`max-height:0` + 透明度过渡），`body.title-hide` 时顶栏只保留右侧的释义开关/收藏夹/主题按钮，上滑或回到顶部恢复。仅改 `style.css`，统计不变。
 19. 修复手机端功能未生效：原移动端判定只看 `(hover:none) and (pointer:coarse)`，很多手机/浏览器会判失败，导致“下滑隐藏标题”和“点击卡片显隐释义”都失灵。现判定放宽为：coarse 媒体查询命中，或移动 UA，或（有触摸且视口 ≤1024px），或无触摸的窄窗口 ≤760px；仅桌面宽屏不受影响。同时手机端首屏默认“释义收起”（加载即 compact，点击词条显示释义、再点任意区域包括释义文本即隐藏，同屏只展开一个）；桌面仍为悬停/聚焦。仅改 `script.js`，统计不变；Edge headless 在模拟 coarse 与 500px 窄窗两种场景验证均通过。
 20. 顶栏收起逻辑重做：①范围改为整条 `.topbar`（含“中国惯用语大全”、释义开关、收藏夹、主题按钮三个控件一起隐藏），用 `transform:translateY(-100%)` 移出视口（不动布局，避免内容跳动）；②判定方向按“手指上滑→隐藏、手指下滑→显示”，并把阈值改为带滞回（隐藏需 dy>8、显示需 dy<-4，4px 内抖动不翻转），消除“鬼畜”；回顶（y≤4）始终显示。仅改 `style.css`/`script.js`，统计不变；Edge headless（500px 窄窗、禁用过渡）验证整条顶栏与三个按钮均移出视口、下滑恢复、微抖动不翻转。
-21. 隐藏模式释义显隐重做（修复三个 bug）：①手机 compact：点一次显示释义、再点一次（含释义文本区域）隐藏，点其它卡片自动切换（原逻辑保留，去掉了点释义区不响应的限制）；②③桌面 compact：不再用 CSS `:hover/:focus-within` 显示，改为 JS 控制 `.open`——`pointerenter` 显示、`pointerleave` 隐藏、`mousedown` 点击立即隐藏并解除卡片内聚焦（修复“点击后光标离开不隐藏”的 bug），键盘 `focusin/focusout` 仍可显示/隐藏。仅改 `style.css`/`script.js`，统计不变；Edge headless 验证桌面 1280px 与手机 500px(coarse) 两种场景均通过。## 常用操作
+21. 隐藏模式释义显隐重做（修复三个 bug）：①手机 compact：点一次显示释义、再点一次（含释义文本区域）隐藏，点其它卡片自动切换（原逻辑保留，去掉了点释义区不响应的限制）；②③桌面 compact：不再用 CSS `:hover/:focus-within` 显示，改为 JS 控制 `.open`——`pointerenter` 显示、`pointerleave` 隐藏、点击立即隐藏并解除卡片内聚焦（修复“点击后光标离开不隐藏”的 bug），键盘 `focusin/focusout` 仍可显示/隐藏。仅改 `style.css`/`script.js`，统计不变；Edge headless 验证桌面 1280px 与手机 500px(coarse) 两种场景均通过。
+22. 新增排序 + 桌面点击切换显隐：①在词类/常用度下方新增“排序”行，支持 默认 / 首字拼音 ↑ / 首字拼音 ↓ / 字数 ↑ / 字数 ↓ 五种（“首字拼音首字母”读取新增 `pinyin_initials.js` 的 `PINYIN_CHAR_INITIALS` 与多音词 `PINYIN_WORD_OVERRIDES`；“字数”按去掉空格/括号后的字符数计；JS 稳定排序，同键保持原顺序；先筛选后排序，排序作用于搜索与词类/常用度筛选结果）；②桌面 compact 释义改为“点击切换”——悬停 `pointerenter` 显示、`pointerleave` 隐藏，点击时展开则隐藏、隐藏则展开，隐藏分支同时解除卡片内聚焦（点击后光标离开不再残留展开）；手机端仍是点按显隐，桌面与手机共用同一点击逻辑分支。仅改 `index.html`/`script.js`/`AGENTS.md`，新增 `pinyin_initials.js`，统计不变；Edge headless 桌面 1280px 与移动 500px 两套自测全部 PASS（排序 5 态 + 显隐切换）。
+23. 排序按钮改为“键 + 方向”式四键 + 默认：按钮文案变为 默认 / 首字拼音 / 字数 / 升序 / 降序；点“默认”时后四个键全部置暗（`.chip.dim` 半透明），升/降序同时禁用不可点；“首字拼音 / 字数”是排序键、“升序 / 降序”是方向，选定键后自动按升序（升序键同时亮起），再点降序即切换，切键时保留当前方向，点默认重置为“默认 + 升序”。状态变量 `sortKey`/`sortDir` 取代原 `sortMode`（比较与渲染判断同步更新）。仅改 `index.html`/`script.js`/`style.css`/`AGENTS.md`，统计不变；Edge headless 桌面 1280px 与移动 500px 两套自测全部 PASS（键态/置暗/禁用 + 五种排序结果 + 显隐切换）。
+## 常用操作
 - 打开网页：浏览器打开 `Html/ChineseIdiomsWeb/index.html`（或直接双击）。
 - 若浏览器缓存旧版：`Ctrl+F5` 强刷。
 - 顶部右侧开关：关闭后释义/例句默认隐藏，鼠标悬停/聚焦词条时显示。
