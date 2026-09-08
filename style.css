@@ -285,6 +285,19 @@ body.compact .card.open .details{
   background:var(--bg-soft);
 }
 .fav-tools-hint{font-size:13px;color:var(--muted)}
+.fav-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
+.fav-act-btn{
+  -webkit-appearance:none;appearance:none;font-family:inherit;cursor:pointer;
+  border:1px solid var(--line);background:var(--card-2);color:var(--text);
+  padding:7px 16px;border-radius:999px;font-size:13px;
+  transition:background .18s ease,color .18s ease,border-color .18s ease;
+}
+.fav-act-btn:hover{border-color:var(--accent);color:var(--accent)}
+.fav-act-btn:active{transform:scale(.97)}
+.fav-file-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+@media (max-width:560px){
+  .fav-actions{justify-content:center}
+}
 .fav-clear-btn{
   -webkit-appearance:none;appearance:none;font-family:inherit;cursor:pointer;
   border:1px solid rgba(229,72,77,.55);background:rgba(229,72,77,.12);color:#ff8a8e;

@@ -179,14 +179,51 @@
     favToolsEl.className = "fav-tools hidden";
     var hint = document.createElement("span");
     hint.className = "fav-tools-hint";
-    hint.textContent = "收藏仅保存在本浏览器，清除后不可恢复。";
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "fav-clear-btn";
-    btn.textContent = "清除浏览数据";
-    btn.addEventListener("click", openClearModal);
+    hint.textContent = "收藏保存在本浏览器，可导出为文件备份，或从文件导入。";
+    var actions = document.createElement("div");
+    actions.className = "fav-actions";
+    function buildBtn(text, cls, cb){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = cls;
+      b.textContent = text;
+      b.addEventListener("click", cb);
+      return b;
+    }
+    var fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".json,application/json";
+    fileInput.className = "fav-file-input";
+    fileInput.setAttribute("aria-label", "选择收藏夹 JSON 文件");
+    fileInput.addEventListener("change", function(ev){
+      var file = (ev.target && ev.target.files && ev.target.files[0]) || null;
+      try { fileInput.value = ""; } catch(e) {}
+      if(!file) return;
+      var reader = new FileReader();
+      reader.onload = function(){
+        var text = typeof reader.result === "string" ? reader.result : "";
+        try {
+          handleImportedFavs(JSON.parse(text));
+        } catch (e) {
+          openModal("导入失败", "所选文件不是有效的收藏夹 JSON 文件，请确认后重试。", [{ label: "知道了" }]);
+        }
+      };
+      reader.onerror = function(){
+        openModal("导入失败", "读取文件失败，请重试。", [{ label: "知道了" }]);
+      };
+      try { reader.readAsText(file, "utf-8"); } catch(e) {
+        openModal("导入失败", "无法读取所选文件。", [{ label: "知道了" }]);
+      }
+    });
+    var exportBtn = buildBtn("导出收藏", "fav-act-btn", exportFavs);
+    var importBtn = buildBtn("导入收藏", "fav-act-btn", function(){ fileInput.click(); });
+    var clearBtn = buildBtn("清除浏览数据", "fav-clear-btn", openClearModal);
+    actions.appendChild(importBtn);
+    actions.appendChild(exportBtn);
+    actions.appendChild(fileInput);
+    actions.appendChild(clearBtn);
     favToolsEl.appendChild(hint);
-    favToolsEl.appendChild(btn);
+    favToolsEl.appendChild(actions);
     if(listEl.nextSibling){
       listEl.parentNode.insertBefore(favToolsEl, listEl.nextSibling);
     } else {
@@ -209,6 +246,80 @@
       { label: "取消" },
       { label: "确定清除", danger: true, cb: clearFavsData }
     ]);
+  }
+  /* 收藏夹：导出为 JSON 文件 */
+  function exportFavs(){
+    var keys = Object.keys(favMap).filter(function(k){ return favMap[k]; });
+    var list = keys.map(function(k){
+      var it = byKey[k];
+      return { key: k, kind: it ? it.kind : "", phrase: it ? it.phrase : "", freq: it ? it.freq : "" };
+    });
+    var json = JSON.stringify(list, null, 2);
+    var blob = null, url = null;
+    try { blob = new Blob([json], { type: "application/json;charset=utf-8" }); } catch(e) { blob = null; }
+    try { if(blob) url = URL.createObjectURL(blob); } catch(e) { url = null; }
+    var a = document.createElement("a");
+    var now = new Date();
+    function p2(n){ return (n < 10 ? "0" : "") + n; }
+    a.download = "惯用语收藏夹-" + now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + ".json";
+    if(url){
+      a.href = url;
+    } else {
+      a.href = "data:application/json;charset=utf-8," + encodeURIComponent(json);
+    }
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){
+      try { if(url) URL.revokeObjectURL(url); } catch(e) {}
+      try { if(a.parentNode) a.parentNode.removeChild(a); } catch(e) {}
+    }, 50);
+  }
+  /* 解析导入内容：兼容导出对象或纯键数组，仅接受当前词库中存在的词条 */
+  function collectImportKeys(data){
+    var keys = [], seenKey = {};
+    function add(k){
+      if(typeof k === "string" && k && byKey[k] && !seenKey[k]){
+        seenKey[k] = 1;
+        keys.push(k);
+      }
+    }
+    if(Object.prototype.toString.call(data) === "[object Array]"){
+      for(var i = 0; i < data.length; i++){
+        var x = data[i];
+        if(typeof x === "string"){
+          add(x);
+        } else if(x && typeof x === "object"){
+          if(typeof x.key === "string"){
+            add(x.key);
+          } else if(typeof x.phrase === "string" && (x.kind === "惯用语" || x.kind === "成语")){
+            add(x.kind + keyOf(x.phrase));
+          }
+        }
+      }
+    }
+    return keys;
+  }
+  function handleImportedFavs(data){
+    var keys = collectImportKeys(data);
+    var rawCount = Object.prototype.toString.call(data) === "[object Array]" ? data.length : 0;
+    if(!keys.length){
+      openModal("导入失败", "文件中没有可导入的有效收藏（词条不在当前词库中，或文件格式不正确）。", [{ label: "知道了" }]);
+      return;
+    }
+    var note = rawCount > keys.length ? "（另有 " + (rawCount - keys.length) + " 条无法识别或不在词库，已忽略）" : "";
+    openModal("导入收藏夹", "文件含 " + keys.length + " 条有效收藏" + note + "。请选择导入方式：", [
+      { label: "取消" },
+      { label: "合并到当前收藏", cb: function(){ applyImportedFavs(keys, false); } },
+      { label: "替换当前收藏", danger: true, cb: function(){ applyImportedFavs(keys, true); } }
+    ]);
+  }
+  function applyImportedFavs(keys, replaceAll){
+    if(replaceAll){ favMap = {}; }
+    for(var i = 0; i < keys.length; i++){ favMap[keys[i]] = 1; }
+    saveFavs();
+    refreshFavButton();
+    render();
+    openModal("导入完成", "导入成功，当前收藏共 " + favCount() + " 条。", [{ label: "知道了" }]);
   }
   var FREQ_ORDER = ["常用", "较常用", "一般", "少见"];
   var PAGE = 50;
