@@ -121,7 +121,7 @@ body.compact .list{margin-bottom:80px}
   border-radius:5px;padding:0 5px}
 .example li b{font-weight:600;color:#dfe4ec}
 
-/* 关闭时：释义与例子隐藏，悬停/聚焦词条以浮层显示 */
+/* 释义隐藏模式：释义浮层由 JS 的 .open 控制显示（手机点按 / 桌面悬停），点击或光标离开即隐藏 */
 body.compact .details{
   position:absolute;left:0;right:0;top:calc(100% - 2px);z-index:50;
   margin:0;padding:14px 18px 16px;
@@ -131,10 +131,6 @@ body.compact .details{
   opacity:0;visibility:hidden;transform:translateY(-6px);
   transition:opacity .18s ease,transform .18s ease,visibility .18s;
   pointer-events:none;
-}
-body.compact .card:hover .details,
-body.compact .card:focus-within .details{
-  opacity:1;visibility:visible;transform:translateY(0);pointer-events:auto;
 }
 
 /* 空结果 */

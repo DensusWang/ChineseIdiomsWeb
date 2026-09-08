@@ -486,6 +486,40 @@
     }
   });
 
+
+  /* 桌面端隐藏模式：悬停显示释义、光标离开隐藏；点击时也隐藏并解除聚焦
+     （手机端仍是点按切换 .open，见上方列表点击处理） */
+  if(!isCoarse){
+    function cardFromNode(node){
+      return (node && node.closest) ? node.closest(".card") : null;
+    }
+    function setCardOpen(card, on){
+      if(card && bodyEl.classList.contains("compact")){
+        card.classList.toggle("open", !!on);
+      }
+    }
+    listEl.addEventListener("pointerenter", function(ev){
+      setCardOpen(cardFromNode(ev.target), true);
+    }, true);
+    listEl.addEventListener("pointerleave", function(ev){
+      setCardOpen(cardFromNode(ev.target), false);
+    }, true);
+    listEl.addEventListener("mousedown", function(ev){
+      var card = cardFromNode(ev.target);
+      if(!card) return;
+      setCardOpen(card, false);
+      var ae = document.activeElement;
+      if(ae && ae !== document.body && card.contains(ae)){
+        try { ae.blur(); } catch(e) {}
+      }
+    }, true);
+    listEl.addEventListener("focusin", function(ev){
+      setCardOpen(cardFromNode(ev.target), true);
+    });
+    listEl.addEventListener("focusout", function(ev){
+      setCardOpen(cardFromNode(ev.target), false);
+    });
+  }
   function bindChips(wrap, attr, cb){
     wrap.addEventListener("click", function(ev){
       var chip = ev.target.closest ? ev.target.closest(".chip") : null;
