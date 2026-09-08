@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
 <title>中国惯用语大全 · 常用惯用语与成语</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="expanded">
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     <div class="brand">
       <div class="brand-mark">惯</div>
-      <div>
+      <div class="brand-copy">
         <h1>中国惯用语大全</h1>
         <p class="subtitle">常用惯用语 · 日常成语 · 释义与示例</p>
       </div>
@@ -21,6 +22,10 @@
         <input type="checkbox" id="displayToggle" checked>
         <span class="track"><span class="thumb"></span></span>
       </label>
+      <div class="top-actions">
+        <button type="button" class="top-btn" id="favToggle" title="查看我的收藏夹（保存在本浏览器）">☆ 收藏夹</button>
+        <button type="button" class="top-btn icon-btn" id="themeToggle" title="切换浅色模式" aria-label="切换浅色 / 深色模式">☀</button>
+      </div>
     </div>
   </header>
 
