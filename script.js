@@ -17,13 +17,23 @@
     try { window.localStorage.setItem(key, value); return true; } catch (e) { return false; }
   }
 
-  /* ---------- 触屏设备判断 ---------- */
-  var isCoarse = false;
-  try {
-    isCoarse = window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  } catch (e) {
-    isCoarse = !!(window.ontouchstart || (window.navigator && navigator.maxTouchPoints > 0));
-  }
+  /* ---------- 移动端判断（触屏 / UA / 窄屏兜底，桌面宽屏不受影响） ---------- */
+  var isCoarse = (function(){
+    var mq = null;
+    try { mq = window.matchMedia ? window.matchMedia("(hover: none) and (pointer: coarse)") : null; } catch (e) { mq = null; }
+    if(mq && mq.matches) return true;
+    var touch = false;
+    try {
+      touch = !!(window.ontouchstart || (window.navigator && window.navigator.maxTouchPoints > 0));
+    } catch (e) { touch = false; }
+    var ua = "";
+    try { ua = String(window.navigator.userAgent || "").toLowerCase(); } catch (e) { ua = ""; }
+    if(/android|iphone|ipod|windows phone|mobile/i.test(ua)) return true;
+    var vw = 0;
+    try { vw = window.innerWidth || 0; } catch (e) { vw = 0; }
+    if(touch && vw > 0 && vw <= 1024) return true;
+    return vw > 0 && vw <= 760;
+  })();
 
   var rootEl = document.documentElement;
   var bodyEl = document.body;
@@ -467,7 +477,6 @@
       return;
     }
     if(isCoarse && bodyEl.classList.contains("compact") && card){
-      if(t.closest(".details")) return;
       var willOpen = !card.classList.contains("open");
       var openCards = listEl.querySelectorAll(".card.open");
       for(var i = 0; i < openCards.length; i++){
@@ -532,6 +541,7 @@
   }
 
   countsEl.textContent = "共 " + items.length + " 条 · 惯用语 " + habitTotal + " · 成语 " + idiomTotal;
+  if(isCoarse && toggleEl){ toggleEl.checked = false; }
   ensureFavTools();
   refreshFavButton();
   applyDisplay();
