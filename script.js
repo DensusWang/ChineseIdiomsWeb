@@ -511,17 +511,20 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(render, 120);
   });
-  /* 移动端：下滑隐藏标题，上滑显示（电脑端不受影响） */
+  /* 移动端：手指上滑（页面向下滚动）→ 隐藏整个顶栏；手指下滑 → 显示（电脑端不受影响） */
   if(isCoarse){
     var lastY = window.pageYOffset || 0;
     var rafPending = false;
     function updateTitleState(){
       var y = window.pageYOffset || (rootEl && rootEl.scrollTop) || 0;
       var dy = y - lastY;
-      if(y <= 2){
-        bodyEl.classList.remove("title-hide");
-      } else if(Math.abs(dy) > 6){
-        bodyEl.classList.toggle("title-hide", dy > 0);
+      var hiding = bodyEl.classList.contains("title-hide");
+      if(y <= 4){
+        if(hiding) bodyEl.classList.remove("title-hide");
+      } else if(hiding){
+        if(dy < -4) bodyEl.classList.remove("title-hide");
+      } else if(dy > 8){
+        bodyEl.classList.add("title-hide");
       }
       lastY = y;
     }
