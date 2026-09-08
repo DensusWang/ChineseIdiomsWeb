@@ -208,11 +208,10 @@ footer .foot-note{color:var(--dim);font-size:12.5px}
   .switch-label{display:none}
   .switch-zone{gap:8px}
 }
-/* 移动端下滑收起标题 */
-.brand-copy{min-width:0;overflow:hidden;max-height:120px;opacity:1;transition:max-height .22s ease,opacity .18s ease,margin .2s ease}
+/* 移动端下滑收起“中国惯用语大全”所在的整块标题容器（含“惯”图标），右侧开关按钮保留 */
+.brand{overflow:hidden;transition:max-height .22s ease,opacity .18s ease,margin .2s ease}
 body.title-hide .topbar{padding-top:8px;padding-bottom:8px}
-body.title-hide .brand-copy{max-height:0;opacity:0;margin:0}
-body.title-hide .brand-mark{width:34px;height:34px;font-size:18px;border-radius:10px}
+body.title-hide .brand{max-height:0;opacity:0;margin:0;pointer-events:none}
 /* 收藏星标 */
 .fav-btn{
   flex:none;background:none;border:none;padding:0 2px;cursor:pointer;
