@@ -325,7 +325,8 @@ body.compact .card.open .details{
 .qr-mini-btn{-webkit-appearance:none;appearance:none;font-family:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card-2);color:var(--text);padding:6px 14px;border-radius:999px;font-size:13px;transition:border-color .16s ease,color .16s ease}
 .qr-mini-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .qr-mini-btn:disabled{opacity:.4;cursor:not-allowed}
-.scan-video{display:block;width:100%;max-width:430px;max-height:52vh;margin:4px auto 6px;background:#000;border-radius:10px;object-fit:cover}
+.scan-video{display:block;width:100%;max-width:430px;max-height:52vh;margin:4px auto 6px;background:#000;border-radius:10px;object-fit:cover;cursor:pointer;touch-action:manipulation;transition:box-shadow .15s ease}
+.scan-flash{box-shadow:0 0 0 4px var(--accent)}
 .scan-status{text-align:center;margin-bottom:4px}
 .fav-clear-btn{
   -webkit-appearance:none;appearance:none;font-family:inherit;cursor:pointer;
