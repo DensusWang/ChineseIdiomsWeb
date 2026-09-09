@@ -677,11 +677,46 @@
     nextBtn.addEventListener("click", function(){ if(cur < parts.length - 1){ cur++; render(); } });
     render();
   }
+
+  function probeNativeQrCapable(){
+    return new Promise(function(resolve){
+      try {
+        var BD = window.BarcodeDetector;
+        if(!BD){ resolve(false); return; }
+        if(typeof BD.getSupportedFormats !== "function"){
+          // 老实现没有能力查询接口，只能假定可用；运行期异常会自动切到本地识别引擎
+          resolve(true);
+          return;
+        }
+        BD.getSupportedFormats().then(function(fmts){
+          var ok = false;
+          if(fmts && typeof fmts.length === "number"){
+            for(var i = 0; i < fmts.length; i++){
+              if(String(fmts[i]).toLowerCase().indexOf("qr") === 0){ ok = true; break; }
+            }
+          }
+          resolve(ok);
+        }, function(){ resolve(false); });
+      } catch(e){
+        resolve(false);
+      }
+    });
+  }
   function startScanImport(){
-    if(typeof window.BarcodeDetector === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
       openModal("扫码导入", "当前浏览器不支持摄像头扫码（推荐使用新版 Chrome / Edge）。可改用「粘贴速传码」或「导入收藏」。", [{ label: "知道了" }]);
       return;
     }
+    probeNativeQrCapable().then(function(nativeOk){
+      var jsqrOk = typeof window.jsQR === "function";
+      if(!nativeOk && !jsqrOk){
+        openModal("扫码导入", "当前浏览器无法扫码（内置扫码器不可用，本地识别引擎也未加载）。可改用「粘贴速传码」或「导入收藏」。", [{ label: "知道了" }]);
+        return;
+      }
+      runScanner(nativeOk, jsqrOk);
+    });
+  }
+  function runScanner(nativeOk, jsqrOk){
     var body = document.createElement("div");
     var video = document.createElement("video");
     video.className = "scan-video";
@@ -698,25 +733,68 @@
     var scanParts = {};
     var scanTotal = 0;
     var detector = null;
-    try { detector = new BarcodeDetector({ formats: ["qr_code"] }); }
-    catch(e){
-      try { detector = new BarcodeDetector(); } catch(e2) { detector = null; }
+    var canvas = null;
+    var canvasCtx = null;
+    var watchdog = null;
+    var loopTimer = null;
+    var busy = false;
+    var nativeActive = false;
+    var mode = nativeOk ? "native" : "jsqr";  // 优先内置识别，识别不到或报错自动切本地 jsQR
+    function setStatus(text){ if(!stopped){ status.textContent = text; } }
+    function clearWatchdog(){ if(watchdog){ clearTimeout(watchdog); watchdog = null; } }
+    function schedule(){
+      if(stopped || loopTimer) return;
+      loopTimer = setTimeout(function(){ loopTimer = null; tick(); }, 350);
     }
-    if(!detector){
-      openModal("扫码导入", "无法初始化扫码器，可改用「粘贴速传码」。", [{ label: "知道了" }]);
-      return;
+    function armWatchdog(){
+      clearWatchdog();
+      if(!jsqrOk || stopped || mode !== "native") return;
+      watchdog = setTimeout(function(){
+        watchdog = null;
+        if(stopped || mode !== "native" || nativeActive) return;
+        switchToJsqr();
+        busy = false;      // 内置 detect 若挂起未返回，强制解除并恢复扫描循环
+        schedule();
+      }, 6000);
+    }
+    function switchToJsqr(){
+      if(stopped || mode === "jsqr") return;
+      mode = "jsqr";
+      clearWatchdog();
+      if(typeof window.jsQR !== "function"){
+        setStatus("内置扫码器不可用，本地识别引擎也未加载，请改用「粘贴速传码」。");
+        return;
+      }
+      setStatus("内置扫码器未响应，已自动切换到本地识别引擎，请继续对准二维码…");
+    }
+    if(mode === "native"){
+      try { detector = new BarcodeDetector({ formats: ["qr_code"] }); }
+      catch(e){ try { detector = new BarcodeDetector(); } catch(e2){ detector = null; } }
+      if(!detector){
+        if(jsqrOk){ switchToJsqr(); }
+        else {
+          openModal("扫码导入", "无法初始化扫码器，可改用「粘贴速传码」。", [{ label: "知道了" }]);
+          return;
+        }
+      }
     }
     function stopScanning(){
       if(stopped) return;
       stopped = true;
-      try {
-        if(stream){ stream.getTracks().forEach(function(tr){ tr.stop(); }); }
-      } catch(e) {}
+      clearWatchdog();
+      if(loopTimer){ clearTimeout(loopTimer); loopTimer = null; }
+      try { if(stream){ stream.getTracks().forEach(function(tr){ tr.stop(); }); } } catch(e){}
     }
-    var closeFn = openCustomModal("扫码导入", body, [
-      { label: "关闭", cb: stopScanning }
-    ], stopScanning);
+    var closeFn = null;
+    function doneAndImport(total){
+      stopScanning();
+      if(closeFn){ closeFn(); }
+      var lines = [];
+      for(var i = 1; i <= total; i++){ lines.push(TRANSFER_TAG + "|" + i + "/" + total + "|" + (scanParts[i] || "")); }
+      importFromTransferText(lines.join("\n"));
+    }
     function handleCode(text){
+      if(stopped) return;
       var p = parsePartLine(text);
       if(!p) return;
       if(scanTotal === 0){ scanTotal = p.total; }
@@ -724,40 +802,82 @@
       if(p.idx < 1 || p.idx > p.total) return;
       scanParts[p.idx] = p.b64;
       var got = Object.keys(scanParts).length;
-      status.textContent = "已识别 " + got + " / " + p.total + " 个码" + (got < p.total ? "，请继续对准下一张…" : "");
-      if(got >= p.total){
-        stopScanning();
-        closeFn();
-        var lines = [];
-        for(var i = 1; i <= p.total; i++){ lines.push(TRANSFER_TAG + "|" + i + "/" + p.total + "|" + (scanParts[i] || "")); }
-        importFromTransferText(lines.join("\n"));
+      setStatus("已识别 " + got + " / " + p.total + " 个码" + (got < p.total ? "，请继续对准下一张…" : ""));
+      if(got >= p.total){ doneAndImport(p.total); }
+    }
+    function readJsqrFrame(){
+      if(typeof window.jsQR !== "function") return false;
+      if(!(video.readyState >= 2 && video.videoWidth > 0)) return false;
+      if(!canvas){
+        try {
+          canvas = document.createElement("canvas");
+          canvasCtx = canvas.getContext ? canvas.getContext("2d", { willReadFrequently: true }) : null;
+        } catch(e){ canvasCtx = null; }
       }
+      if(!canvasCtx) return false;
+      var vw = video.videoWidth, vh = video.videoHeight;
+      var maxDim = 800;
+      var m = vw > vh ? vw : vh;
+      var scale = m > maxDim ? maxDim / m : 1;
+      var cw = Math.max(2, Math.round(vw * scale));
+      var chh = Math.max(2, Math.round(vh * scale));
+      if(canvas.width !== cw){ canvas.width = cw; }
+      if(canvas.height !== chh){ canvas.height = chh; }
+      var imgData = null;
+      try {
+        canvasCtx.drawImage(video, 0, 0, cw, chh);
+        imgData = canvasCtx.getImageData(0, 0, cw, chh);
+      } catch(e){ imgData = null; }
+      if(!imgData) return true;
+      var res = null;
+      try { res = window.jsQR(imgData.data, imgData.width, imgData.height); } catch(e){ res = null; }
+      if(res && res.data && typeof res.data === "string" && res.data.indexOf(TRANSFER_TAG) === 0){
+        handleCode(res.data);
+      }
+      return true;
     }
-    function pollScan(){
-      if(stopped) return;
-      setTimeout(function(){
-        if(stopped) return;
-        if(video.readyState >= 2 && video.videoWidth > 0){
-          try {
-            detector.detect(video).then(function(codes){
-              if(stopped) return;
-              if(codes && codes.length){
-                for(var i = 0; i < codes.length; i++){
-                  var raw = codes[i] && codes[i].rawValue;
-                  if(typeof raw === "string" && raw.indexOf(TRANSFER_TAG) === 0){
-                    handleCode(raw);
-                    break;
-                  }
-                }
+    function tick(){
+      if(stopped || busy) return;
+      if(!(video.readyState >= 2 && video.videoWidth > 0)){ schedule(); return; }
+      if(mode === "native" && detector){
+        var p = null;
+        try { p = detector.detect(video); } catch(e){ p = null; }
+        if(p && typeof p.then === "function"){
+          busy = true;
+          p.then(function(codes){
+            busy = false;
+            if(stopped) return;
+            if(mode !== "native"){ schedule(); return; }
+            if(codes && codes.length){
+              nativeActive = true;
+              clearWatchdog();
+              for(var i = 0; i < codes.length; i++){
+                var raw = codes[i] && codes[i].rawValue;
+                if(typeof raw === "string" && raw.indexOf(TRANSFER_TAG) === 0){ handleCode(raw); break; }
               }
-              pollScan();
-            }).catch(function(){ pollScan(); });
-            return;
-          } catch(e) {}
+            }
+            schedule();
+          }).catch(function(){
+            busy = false;
+            if(stopped) return;
+            if(mode !== "native"){ schedule(); return; }
+            if(jsqrOk){ switchToJsqr(); }
+            else { setStatus("内置扫码器发生错误，请改用「粘贴速传码」或重新打开本页再试。"); }
+            schedule();
+          });
+          return;
         }
-        pollScan();
-      }, 350);
+        // detect 同步抛错或返回了非 Promise
+        if(jsqrOk){ switchToJsqr(); }
+        else { setStatus("内置扫码器发生错误，请改用「粘贴速传码」或重新打开本页再试。"); }
+      } else if(mode === "jsqr"){
+        readJsqrFrame();
+      }
+      schedule();
     }
+    closeFn = openCustomModal("扫码导入", body, [
+      { label: "关闭", cb: stopScanning }
+    ], stopScanning);
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
       .then(function(s){
         if(stopped){
@@ -766,14 +886,18 @@
         }
         stream = s;
         video.srcObject = s;
-        status.textContent = "请把另一台设备上的收藏二维码对准摄像头…";
-        pollScan();
+        if(mode === "jsqr"){
+          setStatus("请把另一台设备屏幕上显示的收藏二维码对准摄像头…（本地识别引擎）");
+        } else {
+          setStatus("请把另一台设备屏幕上显示的收藏二维码对准摄像头…");
+          armWatchdog();
+        }
+        schedule();
       })
       .catch(function(){
-        status.textContent = "无法访问摄像头：请检查浏览器权限后重试，或改用「粘贴速传码」。";
+        setStatus("无法访问摄像头：请检查浏览器权限后重试，或改用「粘贴速传码」。");
       });
   }
-
   var FREQ_ORDER = ["常用", "较常用", "一般", "少见"];
   var PAGE = 50;
 
