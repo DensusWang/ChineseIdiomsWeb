@@ -9,6 +9,7 @@
   var STORE_FAVS = "cy_favs_v1";
   var STORE_THEME = "cy_theme_v1";
   var STORE_WARNED = "cy_fav_warned_v1";
+  var STORE_UNFAV_WARNED = "cy_unfav_warned_v1";
 
   function storeGet(key){
     try { return window.localStorage.getItem(key); } catch (e) { return null; }
@@ -72,21 +73,46 @@
       storeSet(STORE_THEME, next);
     });
   }
-  /* ---------- 收藏（本地存储） ---------- */
+  /* ---------- 收藏（本地存储：dkey → 收藏日期 YYYY-MM-DD） ---------- */
+  /* 兼容旧版：旧数据是纯键数组，读取时统一归到「网站打开当天」并自动升级落盘 */
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+  function dateStrOf(d){
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+  function todayStr(){ return dateStrOf(new Date()); }
+  function validDateStr(x){
+    return typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) ? x : todayStr();
+  }
   var favMap = {};
+  var pendingRemovals = {};
   (function(){
     var raw = storeGet(STORE_FAVS);
     if(!raw) return;
+    var migrated = false;
     try {
       var arr = JSON.parse(raw);
       if(Object.prototype.toString.call(arr) === "[object Array]"){
         for(var i = 0; i < arr.length; i++){
-          if(typeof arr[i] === "string") favMap[arr[i]] = 1;
+          var k = null;
+          var d = todayStr();
+          var x = arr[i];
+          if(typeof x === "string"){
+            k = x;
+            d = todayStr();
+            migrated = true;
+          } else if(x && typeof x === "object"){
+            if(typeof x.k === "string"){ k = x.k; }
+            else if(typeof x.key === "string"){ k = x.key; }
+            if(typeof x.d === "string"){ d = validDateStr(x.d); }
+            else { migrated = true; }
+          }
+          if(k && typeof k === "string" && !(k in favMap)){ favMap[k] = d; }
         }
       }
     } catch (e) {
       favMap = {};
     }
+    if(migrated){ saveFavs(); }
   })();
   function favCount(){
     var n = 0;
@@ -94,11 +120,14 @@
     return n;
   }
   function saveFavs(){
-    storeSet(STORE_FAVS, JSON.stringify(Object.keys(favMap)));
+    var arr = Object.keys(favMap).map(function(k){
+      return { k: k, d: validDateStr(favMap[k]) };
+    });
+    storeSet(STORE_FAVS, JSON.stringify(arr));
   }
-  function isFav(key){
-    return !!favMap[key];
-  }
+  function isFav(key){ return !!favMap[key]; }
+  function isFavShown(key){ return isFav(key) && !pendingRemovals[key]; }
+  function favDateOf(key){ return validDateStr(favMap[key]); }
   function refreshFavButton(){
     if(!favToggleBtn) return;
     var n = favCount();
@@ -106,6 +135,16 @@
     favToggleBtn.classList.toggle("on", favOnly);
     favToggleBtn.setAttribute("aria-pressed", favOnly ? "true" : "false");
   }
+  function commitPendingRemovals(){
+    var any = false;
+    for(var k in pendingRemovals){
+      if(pendingRemovals[k] && favMap[k]){ delete favMap[k]; any = true; }
+    }
+    pendingRemovals = {};
+    if(any){ saveFavs(); refreshFavButton(); }
+    return any;
+  }
+
   /* 通用小弹窗（遮罩 + 标题 + 说明 + 按钮组） */
   function openModal(titleText, bodyText, buttons){
     var mask = document.createElement("div");
@@ -139,49 +178,65 @@
     bodyEl.appendChild(mask);
     return closeModal;
   }
-  var warnShownThisSession = false;
-  function maybeWarnFirstFav(){
-    if(warnShownThisSession) return;
-    warnShownThisSession = true;
-    storeSet(STORE_WARNED, "1");
-    openModal("收藏提示", "收藏保存在当前浏览器的本地存储中：请始终用你常用的浏览器打开本页；若更换浏览器、使用隐私浏览或清除浏览器数据，收藏可能会丢失。", [
-      { label: "知道了" }
-    ]);
+  /* 「第一次」判定一律以本地数据里已持久化的标记为准，不在现场用算法推断 */
+  function warnOnce(key, title, body){
+    if(storeGet(key) === "1") return false;
+    storeSet(key, "1");
+    openModal(title, body, [{ label: "知道了" }]);
+    return true;
   }
-  function toggleFav(item){
-    var had = isFav(item.dkey);
-    if(had){
-      delete favMap[item.dkey];
-    } else {
-      var wasEmpty = favCount() === 0;
-      var neverWarned = !storeGet(STORE_WARNED);
-      favMap[item.dkey] = 1;
-      if(wasEmpty || neverWarned) maybeWarnFirstFav();
-    }
+  function maybeWarnFirstFav(){
+    return warnOnce(STORE_WARNED, "收藏提示", "收藏保存在当前浏览器的本地存储中：请始终用你常用的浏览器打开本页；若更换浏览器、使用隐私浏览或清除浏览器数据，收藏可能会丢失。");
+  }
+  function maybeWarnFirstUnfav(){
+    return warnOnce(STORE_UNFAV_WARNED, "取消收藏提示", "点灰星星后，该词条不会立刻消失，会暂时保留；只有关闭收藏夹或离开网页时，取消收藏才会正式保存。若想反悔，在保存前再点一下星星即可恢复。");
+  }
+  /* 点亮收藏：记录当天日期并立即保存（首次点亮时按数据标记提醒一次） */
+  function addFav(item){
+    if(!isFav(item.dkey)){ favMap[item.dkey] = todayStr(); }
+    maybeWarnFirstFav();
     saveFavs();
     refreshFavButton();
-    return !had;
+  }
+  /* 点灰取消：只记为「待移除」，不立刻保存；关闭收藏夹或离开网页时才落盘 */
+  function scheduleRemoveFav(item){
+    pendingRemovals[item.dkey] = 1;
+    maybeWarnFirstUnfav();
+  }
+  function restoreFav(item){
+    delete pendingRemovals[item.dkey];
+  }
+  /* 星标 UI：on=点亮；pending=已点灰待移除（显示灰星） */
+  function favStarUI(star, on, pending){
+    star.textContent = on ? "★" : "☆";
+    star.classList.toggle("on", on);
+    star.classList.toggle("pending-remove", !!pending && !on);
+    star.setAttribute("aria-pressed", on ? "true" : "false");
+    star.title = on
+      ? "取消收藏：点灰后关闭收藏夹或离开网页时才生效"
+      : pending
+        ? "已点灰待移除：再点一下恢复（关闭收藏夹或离开网页后生效）"
+        : "收藏（记录为今天的日期，保存在本浏览器）";
   }
 
   var favOnly = false;
   if(favToggleBtn){
     favToggleBtn.addEventListener("click", function(){
       favOnly = !favOnly;
+      if(!favOnly){ commitPendingRemovals(); }  // 关闭收藏夹 → 正式保存点灰的移除
       refreshFavButton();
       render();
     });
   }
+  window.addEventListener("beforeunload", function(){ commitPendingRemovals(); });
+  window.addEventListener("pagehide", function(){ commitPendingRemovals(); });
+
   /* ---------- 收藏栏：清除浏览数据 ---------- */
   var favToolsEl = null;
   function ensureFavTools(){
     if(favToolsEl || !listEl.parentNode) return;
     favToolsEl = document.createElement("div");
     favToolsEl.className = "fav-tools hidden";
-    var hint = document.createElement("span");
-    hint.className = "fav-tools-hint";
-    hint.textContent = "收藏保存在本浏览器，可导出为文件备份，或从文件导入。";
-    var actions = document.createElement("div");
-    actions.className = "fav-actions";
     function buildBtn(text, cls, cb){
       var b = document.createElement("button");
       b.type = "button";
@@ -215,20 +270,74 @@
         openModal("导入失败", "无法读取所选文件。", [{ label: "知道了" }]);
       }
     });
-    var exportBtn = buildBtn("导出收藏", "fav-act-btn", exportFavs);
-    var importBtn = buildBtn("导入收藏", "fav-act-btn", function(){ fileInput.click(); });
-    var clearBtn = buildBtn("清除浏览数据", "fav-clear-btn", openClearModal);
-    actions.appendChild(importBtn);
-    actions.appendChild(exportBtn);
-    actions.appendChild(fileInput);
-    actions.appendChild(clearBtn);
-    favToolsEl.appendChild(hint);
-    favToolsEl.appendChild(actions);
-    if(listEl.nextSibling){
-      listEl.parentNode.insertBefore(favToolsEl, listEl.nextSibling);
-    } else {
-      listEl.parentNode.appendChild(favToolsEl);
+    var hint = document.createElement("span");
+    hint.className = "fav-tools-hint";
+    hint.textContent = "收藏保存在本浏览器：可导出文件备份，也可用速传码 / 二维码在设备间快速传输。";
+    var bar = document.createElement("div");
+    bar.className = "fav-tools-bar";
+    var panels = document.createElement("div");
+    panels.className = "fav-drop-panels";
+    var groups = [
+      { g: "transfer", label: "速传码", options: [
+        { text: "速传码", cb: showTransferCode },
+        { text: "粘贴速传码", cb: showPasteTransfer }
+      ]},
+      { g: "qr", label: "二维码", options: [
+        { text: "生成二维码", cb: showQrModal },
+        { text: "扫码导入", cb: startScanImport }
+      ]},
+      { g: "io", label: "导入导出", options: [
+        { text: "导入收藏", cb: function(){ fileInput.click(); } },
+        { text: "导出收藏", cb: exportFavs }
+      ]}
+    ];
+    var favOpenGroup = "";
+    function refreshPanels(){
+      groups.forEach(function(grp){
+        var isOpen = favOpenGroup === grp.g;
+        grp.head.classList.toggle("open", isOpen);
+        grp.head.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        grp.row.classList.toggle("open", isOpen);
+      });
     }
+    groups.forEach(function(grp){
+      var head = document.createElement("button");
+      head.type = "button";
+      head.className = "fav-group-btn";
+      head.setAttribute("aria-expanded", "false");
+      head.appendChild(document.createTextNode(grp.label));
+      var caret = document.createElement("span");
+      caret.className = "caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = "▾";
+      head.appendChild(caret);
+      head.addEventListener("click", function(){
+        favOpenGroup = favOpenGroup === grp.g ? "" : grp.g;
+        refreshPanels();
+      });
+      grp.head = head;
+      bar.appendChild(head);
+      var row = document.createElement("div");
+      row.className = "fav-drop-panel";
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", grp.label);
+      grp.options.forEach(function(opt){
+        row.appendChild(buildBtn(opt.text, "fav-act-btn", function(){
+          if(favOpenGroup === grp.g){ favOpenGroup = ""; }
+          refreshPanels();
+          opt.cb();
+        }));
+      });
+      grp.row = row;
+      panels.appendChild(row);
+    });
+    var clearBtn = buildBtn("清除浏览数据", "fav-clear-btn", openClearModal);
+    bar.appendChild(clearBtn);
+    favToolsEl.appendChild(bar);
+    favToolsEl.appendChild(panels);
+    favToolsEl.appendChild(hint);
+    // 工具区放在词条列表上方：进入收藏夹时操作面板在最上面
+    listEl.parentNode.insertBefore(favToolsEl, listEl);
   }
   function syncFavTools(){
     if(!favToolsEl) return;
@@ -237,6 +346,7 @@
   }
   function clearFavsData(){
     favMap = {};
+    pendingRemovals = {};
     saveFavs();
     refreshFavButton();
     render();
@@ -249,10 +359,11 @@
   }
   /* 收藏夹：导出为 JSON 文件 */
   function exportFavs(){
+    commitPendingRemovals();
     var keys = Object.keys(favMap).filter(function(k){ return favMap[k]; });
     var list = keys.map(function(k){
       var it = byKey[k];
-      return { key: k, kind: it ? it.kind : "", phrase: it ? it.phrase : "", freq: it ? it.freq : "" };
+      return { key: k, kind: it ? it.kind : "", phrase: it ? it.phrase : "", freq: it ? it.freq : "", date: favMap[k] ? favMap[k] : todayStr() };
     });
     var json = JSON.stringify(list, null, 2);
     var blob = null, url = null;
@@ -274,53 +385,395 @@
       try { if(a.parentNode) a.parentNode.removeChild(a); } catch(e) {}
     }, 50);
   }
-  /* 解析导入内容：兼容导出对象或纯键数组，仅接受当前词库中存在的词条 */
-  function collectImportKeys(data){
-    var keys = [], seenKey = {};
-    function add(k){
-      if(typeof k === "string" && k && byKey[k] && !seenKey[k]){
-        seenKey[k] = 1;
-        keys.push(k);
+  /* 解析导入内容：兼容导出对象（含 date）或纯键数组；仅接受当前词库中存在的词条 */
+  function collectImportEntries(data){
+    var entries = [], seen = {};
+    function add(k, d){
+      if(typeof k === "string" && k && byKey[k] && !seen[k]){
+        seen[k] = 1;
+        entries.push({ k: k, d: d });
       }
     }
     if(Object.prototype.toString.call(data) === "[object Array]"){
       for(var i = 0; i < data.length; i++){
         var x = data[i];
         if(typeof x === "string"){
-          add(x);
+          add(x, todayStr());
         } else if(x && typeof x === "object"){
+          var d = validDateStr(x.d);
           if(typeof x.key === "string"){
-            add(x.key);
+            add(x.key, d);
           } else if(typeof x.phrase === "string" && (x.kind === "惯用语" || x.kind === "成语")){
-            add(x.kind + keyOf(x.phrase));
+            add(x.kind + keyOf(x.phrase), d);
           }
         }
       }
     }
-    return keys;
+    return entries;
   }
   function handleImportedFavs(data){
-    var keys = collectImportKeys(data);
+    var entries = collectImportEntries(data);
     var rawCount = Object.prototype.toString.call(data) === "[object Array]" ? data.length : 0;
-    if(!keys.length){
+    if(!entries.length){
       openModal("导入失败", "文件中没有可导入的有效收藏（词条不在当前词库中，或文件格式不正确）。", [{ label: "知道了" }]);
       return;
     }
-    var note = rawCount > keys.length ? "（另有 " + (rawCount - keys.length) + " 条无法识别或不在词库，已忽略）" : "";
-    openModal("导入收藏夹", "文件含 " + keys.length + " 条有效收藏" + note + "。请选择导入方式：", [
+    var note = rawCount > entries.length ? "（另有 " + (rawCount - entries.length) + " 条无法识别或不在词库，已忽略）" : "";
+    openModal("导入收藏夹", "文件含 " + entries.length + " 条有效收藏" + note + "。请选择导入方式：", [
       { label: "取消" },
-      { label: "合并到当前收藏", cb: function(){ applyImportedFavs(keys, false); } },
-      { label: "替换当前收藏", danger: true, cb: function(){ applyImportedFavs(keys, true); } }
+      { label: "合并到当前收藏", cb: function(){ applyImportedFavs(entries, false); } },
+      { label: "替换当前收藏", danger: true, cb: function(){ applyImportedFavs(entries, true); } }
     ]);
   }
-  function applyImportedFavs(keys, replaceAll){
-    if(replaceAll){ favMap = {}; }
-    for(var i = 0; i < keys.length; i++){ favMap[keys[i]] = 1; }
+  function applyImportedFavs(entries, replaceAll){
+    if(replaceAll){ favMap = {}; pendingRemovals = {}; }
+    for(var i = 0; i < entries.length; i++){
+      var e = entries[i];
+      if(!favMap[e.k]){ favMap[e.k] = validDateStr(e.d); }  // 已存在的收藏保留原日期
+    }
     saveFavs();
     refreshFavButton();
     render();
     openModal("导入完成", "导入成功，当前收藏共 " + favCount() + " 条。", [{ label: "知道了" }]);
   }
+
+  /* ================= 快捷传输：速传码（复制/粘贴）与二维码（生成/扫码） ================= */
+  function openCustomModal(titleText, bodyNode, buttons, onClose){
+    var mask = document.createElement("div");
+    mask.className = "modal-mask";
+    var box = document.createElement("div");
+    box.className = "modal-box";
+    var title = document.createElement("p");
+    title.className = "modal-title";
+    title.textContent = titleText;
+    box.appendChild(title);
+    var wrap = document.createElement("div");
+    wrap.className = "modal-custom-body";
+    if(bodyNode){ wrap.appendChild(bodyNode); }
+    box.appendChild(wrap);
+    var actions = document.createElement("div");
+    actions.className = "modal-actions";
+    function closeModal(){
+      if(mask.parentNode){ mask.parentNode.removeChild(mask); }
+      if(onClose){ onClose(); }
+    }
+    (buttons || []).forEach(function(b){
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "modal-btn" + (b.danger ? " danger" : "");
+      btn.textContent = b.label;
+      btn.addEventListener("click", function(){
+        closeModal();
+        if(b.cb) b.cb();
+      });
+      actions.appendChild(btn);
+    });
+    box.appendChild(actions);
+    mask.appendChild(box);
+    mask.addEventListener("click", function(ev){ if(ev.target === mask) closeModal(); });
+    bodyEl.appendChild(mask);
+    return closeModal;
+  }
+
+  function favKeysList(){
+    return Object.keys(favMap).filter(function(k){ return favMap[k]; });
+  }
+  function utf8Encode(str){ return new TextEncoder().encode(str); }
+  function utf8Decode(bytes){ return new TextDecoder("utf-8").decode(bytes); }
+  function bytesToB64url(bytes){
+    var s = "";
+    for(var i = 0; i < bytes.length; i++){ s += String.fromCharCode(bytes[i]); }
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64urlToBytes(str){
+    var b = String(str || "").replace(/-/g, "+").replace(/_/g, "/");
+    while(b.length % 4){ b += "="; }
+    var bin = atob(b);
+    var out = new Uint8Array(bin.length);
+    for(var i = 0; i < bin.length; i++){ out[i] = bin.charCodeAt(i); }
+    return out;
+  }
+  var TRANSFER_TAG = "CYFAV1";
+  var TRANSFER_PART_BYTES = 800;
+  function buildTransferParts(){
+    var payload = JSON.stringify(favKeysList());
+    var bytes = utf8Encode(payload);
+    var total = Math.max(1, Math.ceil(bytes.length / TRANSFER_PART_BYTES));
+    var parts = [];
+    for(var i = 0; i < total; i++){
+      var start = i * TRANSFER_PART_BYTES;
+      var end = Math.min(bytes.length, start + TRANSFER_PART_BYTES);
+      var chunk = bytes.subarray(start, end);
+      parts.push(TRANSFER_TAG + "|" + (i + 1) + "/" + total + "|" + bytesToB64url(chunk));
+    }
+    return parts;
+  }
+  function parsePartLine(line){
+    var m = /^CYFAV1\|(\d+)\/(\d+)\|([A-Za-z0-9_\-]+)$/.exec(String(line || "").trim());
+    if(!m) return null;
+    return { idx: parseInt(m[1], 10), total: parseInt(m[2], 10), b64: m[3] };
+  }
+  function decodePartsFromLines(lines){
+    var parts = {}, total = 0;
+    lines.forEach(function(line){
+      var p = parsePartLine(line);
+      if(!p) return;
+      if(total === 0){ total = p.total; }
+      else if(total !== p.total){ throw new Error("速传码段数不一致，请重新复制完整内容。"); }
+      if(p.idx < 1 || p.idx > p.total){ throw new Error("速传码序号无效。"); }
+      parts[p.idx] = p.b64;
+    });
+    if(total === 0){ throw new Error("没有识别到速传码内容。"); }
+    if(Object.keys(parts).length < total){ throw new Error("速传码不完整：已收到 " + Object.keys(parts).length + " / " + total + " 段。"); }
+    var byteParts = [];
+    for(var i = 1; i <= total; i++){ byteParts.push(b64urlToBytes(parts[i])); }
+    var len = 0;
+    byteParts.forEach(function(b){ len += b.length; });
+    var all = new Uint8Array(len);
+    var off = 0;
+    byteParts.forEach(function(b){ all.set(b, off); off += b.length; });
+    return JSON.parse(utf8Decode(all));
+  }
+  function linesOfText(text){ return String(text || "").split(/\r?\n/); }
+  function legacyCopyText(text){
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch(e) {}
+    try { if(ta.parentNode) ta.parentNode.removeChild(ta); } catch(e) {}
+  }
+  function copyTransferText(text, done){
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(
+        function(){ if(done) done(true); },
+        function(){ legacyCopyText(text); if(done) done(false); }
+      );
+    } else {
+      legacyCopyText(text);
+      if(done) done(false);
+    }
+  }
+  function showTransferCode(){
+    var parts = buildTransferParts();
+    if(!parts.length){
+      openModal("速传码", "当前没有收藏，无法生成速传码。", [{ label: "知道了" }]);
+      return;
+    }
+    var code = parts.join("\n");
+    var body = document.createElement("div");
+    var tip = document.createElement("p");
+    tip.className = "modal-text";
+    tip.textContent = parts.length > 1
+      ? "速传码共 " + parts.length + " 行（多行要完整复制）。发给另一台设备后，对方在本页点「粘贴速传码」即可导入。"
+      : "把下面这行速传码完整复制，发给另一台设备；对方在本页点「粘贴速传码」即可导入。";
+    var ta = document.createElement("textarea");
+    ta.className = "transfer-code";
+    ta.setAttribute("readonly", "");
+    ta.value = code;
+    var copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "fav-act-btn";
+    copyBtn.textContent = "复制代码";
+    copyBtn.addEventListener("click", function(){
+      copyTransferText(code, function(){ copyBtn.textContent = "已复制 ✓"; });
+    });
+    body.appendChild(tip);
+    body.appendChild(ta);
+    body.appendChild(copyBtn);
+    openCustomModal("速传码", body, [{ label: "关闭" }]);
+    try { ta.focus(); ta.select(); } catch(e) {}
+  }
+  function showPasteTransfer(){
+    var body = document.createElement("div");
+    var tip = document.createElement("p");
+    tip.className = "modal-text";
+    tip.textContent = "把对方发来的速传码粘贴到下面（多行请全部粘贴），然后点「导入」。";
+    var ta = document.createElement("textarea");
+    ta.className = "transfer-code";
+    ta.placeholder = "在此粘贴速传码…";
+    body.appendChild(tip);
+    body.appendChild(ta);
+    openCustomModal("粘贴速传码", body, [
+      { label: "取消" },
+      { label: "导入", cb: function(){ importFromTransferText(ta.value); } }
+    ]);
+  }
+  function importFromTransferText(text){
+    var payload = null;
+    try {
+      payload = decodePartsFromLines(linesOfText(text));
+    } catch(e){
+      openModal("导入失败", (e && e.message) ? e.message : "速传码无法识别，请重新复制完整内容。", [{ label: "知道了" }]);
+      return;
+    }
+    if(Object.prototype.toString.call(payload) !== "[object Array]"){
+      openModal("导入失败", "速传码内容格式不正确。", [{ label: "知道了" }]);
+      return;
+    }
+    handleImportedFavs(payload);
+  }
+  function makeQrNode(text){
+    var holder = document.createElement("div");
+    holder.className = "qr-img";
+    try {
+      var qr = window.qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      holder.innerHTML = qr.createImgTag(3, 2);
+    } catch(e){
+      holder.textContent = "二维码生成失败（内容可能过长），请改用速传码或导出收藏。";
+    }
+    return holder;
+  }
+  function showQrModal(){
+    var parts = buildTransferParts();
+    if(!parts.length){
+      openModal("生成二维码", "当前没有收藏，无法生成二维码。", [{ label: "知道了" }]);
+      return;
+    }
+    if(parts.length > 24){
+      openModal("二维码过多", "收藏较多，需要 " + parts.length + " 个二维码，建议改用「速传码」或「导出收藏」。", [{ label: "知道了" }]);
+      return;
+    }
+    var body = document.createElement("div");
+    var tip = document.createElement("p");
+    tip.className = "modal-text";
+    tip.textContent = "让另一台设备在本页点「扫码导入」，对准下方二维码扫描即可。" + (parts.length > 1 ? "收藏较多时已拆成多张二维码，请按顺序逐张扫描。" : "");
+    var stage = document.createElement("div");
+    stage.className = "qr-stage";
+    var counter = document.createElement("p");
+    counter.className = "qr-counter";
+    var nav = document.createElement("div");
+    nav.className = "qr-nav";
+    var prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.className = "qr-mini-btn";
+    prevBtn.textContent = "上一张";
+    var nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "qr-mini-btn";
+    nextBtn.textContent = "下一张";
+    nav.appendChild(prevBtn);
+    nav.appendChild(counter);
+    nav.appendChild(nextBtn);
+    body.appendChild(tip);
+    body.appendChild(stage);
+    body.appendChild(nav);
+    openCustomModal("生成二维码", body, [{ label: "关闭" }]);
+    var cur = 0;
+
+    function render(){
+      stage.innerHTML = "";
+      stage.appendChild(makeQrNode(parts[cur]));
+      counter.textContent = "第 " + (cur + 1) + " / " + parts.length + " 个二维码";
+      prevBtn.disabled = (cur === 0);
+      nextBtn.disabled = (cur === parts.length - 1);
+    }
+    prevBtn.addEventListener("click", function(){ if(cur > 0){ cur--; render(); } });
+    nextBtn.addEventListener("click", function(){ if(cur < parts.length - 1){ cur++; render(); } });
+    render();
+  }
+  function startScanImport(){
+    if(typeof window.BarcodeDetector === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      openModal("扫码导入", "当前浏览器不支持摄像头扫码（推荐使用新版 Chrome / Edge）。可改用「粘贴速传码」或「导入收藏」。", [{ label: "知道了" }]);
+      return;
+    }
+    var body = document.createElement("div");
+    var video = document.createElement("video");
+    video.className = "scan-video";
+    video.setAttribute("autoplay", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("muted", "");
+    var status = document.createElement("p");
+    status.className = "modal-text scan-status";
+    status.textContent = "正在启动摄像头…";
+    body.appendChild(video);
+    body.appendChild(status);
+    var stopped = false;
+    var stream = null;
+    var scanParts = {};
+    var scanTotal = 0;
+    var detector = null;
+    try { detector = new BarcodeDetector({ formats: ["qr_code"] }); }
+    catch(e){
+      try { detector = new BarcodeDetector(); } catch(e2) { detector = null; }
+    }
+    if(!detector){
+      openModal("扫码导入", "无法初始化扫码器，可改用「粘贴速传码」。", [{ label: "知道了" }]);
+      return;
+    }
+    function stopScanning(){
+      if(stopped) return;
+      stopped = true;
+      try {
+        if(stream){ stream.getTracks().forEach(function(tr){ tr.stop(); }); }
+      } catch(e) {}
+    }
+    var closeFn = openCustomModal("扫码导入", body, [
+      { label: "关闭", cb: stopScanning }
+    ], stopScanning);
+    function handleCode(text){
+      var p = parsePartLine(text);
+      if(!p) return;
+      if(scanTotal === 0){ scanTotal = p.total; }
+      else if(scanTotal !== p.total){ scanTotal = p.total; scanParts = {}; }
+      if(p.idx < 1 || p.idx > p.total) return;
+      scanParts[p.idx] = p.b64;
+      var got = Object.keys(scanParts).length;
+      status.textContent = "已识别 " + got + " / " + p.total + " 个码" + (got < p.total ? "，请继续对准下一张…" : "");
+      if(got >= p.total){
+        stopScanning();
+        closeFn();
+        var lines = [];
+        for(var i = 1; i <= p.total; i++){ lines.push(TRANSFER_TAG + "|" + i + "/" + p.total + "|" + (scanParts[i] || "")); }
+        importFromTransferText(lines.join("\n"));
+      }
+    }
+    function pollScan(){
+      if(stopped) return;
+      setTimeout(function(){
+        if(stopped) return;
+        if(video.readyState >= 2 && video.videoWidth > 0){
+          try {
+            detector.detect(video).then(function(codes){
+              if(stopped) return;
+              if(codes && codes.length){
+                for(var i = 0; i < codes.length; i++){
+                  var raw = codes[i] && codes[i].rawValue;
+                  if(typeof raw === "string" && raw.indexOf(TRANSFER_TAG) === 0){
+                    handleCode(raw);
+                    break;
+                  }
+                }
+              }
+              pollScan();
+            }).catch(function(){ pollScan(); });
+            return;
+          } catch(e) {}
+        }
+        pollScan();
+      }, 350);
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then(function(s){
+        if(stopped){
+          s.getTracks().forEach(function(tr){ tr.stop(); });
+          return;
+        }
+        stream = s;
+        video.srcObject = s;
+        status.textContent = "请把另一台设备上的收藏二维码对准摄像头…";
+        pollScan();
+      })
+      .catch(function(){
+        status.textContent = "无法访问摄像头：请检查浏览器权限后重试，或改用「粘贴速传码」。";
+      });
+  }
+
   var FREQ_ORDER = ["常用", "较常用", "一般", "少见"];
   var PAGE = 50;
 
@@ -393,14 +846,13 @@
 
     var right = document.createElement("div");
     right.className = "card-top-right";
-    var starred = isFav(item.dkey);
+    var pending = isFav(item.dkey) && !!pendingRemovals[item.dkey];
+    var starred = isFavShown(item.dkey);
     var favStar = document.createElement("button");
     favStar.type = "button";
-    favStar.className = "fav-btn" + (starred ? " on" : "");
-    favStar.title = starred ? "取消收藏（保存在本浏览器）" : "收藏（保存在本浏览器）";
-    favStar.setAttribute("aria-pressed", starred ? "true" : "false");
-    favStar.textContent = starred ? "★" : "☆";
+    favStar.className = "fav-btn";
     right.appendChild(favStar);
+    favStarUI(favStar, starred, pending);
 
     var tag = document.createElement("span");
     tag.className = "tag " + (item.kind === "惯用语" ? "habit" : "idiom");
@@ -501,7 +953,65 @@
     renderMoreArea();
   }
 
+  /* 收藏夹视图：按收藏日期分组、折叠展示；其它视图保持筛选 + 分页 */
+  function renderFavs(){
+    var favs = items.filter(matches);
+    shown = favs;
+    listEl.textContent = "";
+    if(!favs.length){
+      var empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = favCount() > 0
+        ? "当前收藏里没有符合条件的词条，试试调整筛选条件。"
+        : "还没有收藏任何词条：点开词条卡片，点击右上角的 ☆ 即可收藏。";
+      listEl.appendChild(empty);
+      return;
+    }
+    var groups = {};
+    favs.forEach(function(it){
+      var d = favDateOf(it.dkey);
+      if(!groups[d]) groups[d] = [];
+      groups[d].push(it);
+    });
+    var dates = Object.keys(groups).sort().reverse();
+    dates.forEach(function(d){
+      var arr = groups[d];
+      if(sortKey !== "default"){ arr = arr.slice().sort(compareBySort); }
+      var det = document.createElement("details");
+      det.className = "fav-day";
+      // 只有今天的栏目默认展开，其它日期默认折叠
+      if(d === todayStr()){ det.setAttribute("open", ""); }
+      var sum = document.createElement("summary");
+      sum.className = "fav-day-head";
+      var chev = document.createElement("span");
+      chev.className = "chev";
+      chev.setAttribute("aria-hidden", "true");
+      chev.textContent = "▾";
+      var lab = document.createElement("span");
+      lab.className = "day-label";
+      lab.textContent = d;
+      var cnt = document.createElement("span");
+      cnt.className = "day-count";
+      cnt.textContent = arr.length + " 条";
+      sum.appendChild(chev);
+      sum.appendChild(lab);
+      sum.appendChild(cnt);
+      det.appendChild(sum);
+      var bodyWrap = document.createElement("div");
+      bodyWrap.className = "fav-day-body";
+      arr.forEach(function(it){ bodyWrap.appendChild(buildCard(it)); });
+      det.appendChild(bodyWrap);
+      listEl.appendChild(det);
+    });
+  }
+
   function render(){
+    if(favOnly){
+      renderFavs();
+      syncFavTools();
+      updateGuide();
+      return;
+    }
     shown = items.filter(matches);
     if(sortKey !== "default"){ shown.sort(compareBySort); }
     rendered = 0;
@@ -510,17 +1020,9 @@
     if(!shown.length){
       var empty = document.createElement("div");
       empty.className = "empty";
-      var msg;
-      if(favOnly){
-        msg = favCount() > 0
-          ? "当前收藏里没有符合条件的词条，试试调整筛选条件。"
-          : "还没有收藏任何词条：点开词条卡片，点击右上角的 ☆ 即可收藏。";
-      } else if(currentQuery || currentFreq !== "all" || currentCat !== "all"){
-        msg = "没有找到符合条件的词条，换一个关键词或筛选条件试试。";
-      } else {
-        msg = "当前词库暂无内容。";
-      }
-      empty.textContent = msg;
+      empty.textContent = currentQuery || currentFreq !== "all" || currentCat !== "all"
+        ? "没有找到符合条件的词条，换一个关键词或筛选条件试试。"
+        : "当前词库暂无内容。";
       listEl.appendChild(empty);
     } else {
       drawMore();
@@ -606,12 +1108,18 @@
       var key = card.getAttribute("data-key");
       var item = key ? byKey[key] : null;
       if(item){
-        var added = toggleFav(item);
-        favStar.textContent = added ? "★" : "☆";
-        favStar.classList.toggle("on", added);
-        favStar.setAttribute("aria-pressed", added ? "true" : "false");
-        favStar.title = added ? "取消收藏（保存在本浏览器）" : "收藏（保存在本浏览器）";
-        if(!added && favOnly){ render(); }
+        if(isFav(item.dkey)){
+          if(pendingRemovals[item.dkey]){
+            restoreFav(item);
+            favStarUI(favStar, true, false);
+          } else {
+            scheduleRemoveFav(item);
+            favStarUI(favStar, false, true);
+          }
+        } else {
+          addFav(item);
+          favStarUI(favStar, true, false);
+        }
       }
       return;
     }
@@ -630,7 +1138,7 @@
         }
       }
     }
-  });
+  });
 
   /* 桌面端隐藏模式：悬停显示释义、光标离开隐藏；列表点击处理里点击切换显隐 */
   if(!isCoarse){
